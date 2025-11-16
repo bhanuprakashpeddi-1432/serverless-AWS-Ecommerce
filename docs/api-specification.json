@@ -1,0 +1,1133 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Serverless E-Commerce API",
+    "description": "RESTful API for a serverless e-commerce platform built on AWS",
+    "version": "1.0.0",
+    "contact": {
+      "name": "API Support",
+      "email": "support@example.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.example.com/v1",
+      "description": "Production server"
+    },
+    {
+      "url": "https://api-dev.example.com/v1",
+      "description": "Development server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Products",
+      "description": "Product catalog operations"
+    },
+    {
+      "name": "Cart",
+      "description": "Shopping cart management"
+    },
+    {
+      "name": "Checkout",
+      "description": "Checkout and payment processing"
+    },
+    {
+      "name": "Orders",
+      "description": "Order management"
+    }
+  ],
+  "paths": {
+    "/products": {
+      "get": {
+        "tags": ["Products"],
+        "summary": "List all products",
+        "description": "Retrieve a paginated list of products with optional filtering by category, price range, and search query",
+        "operationId": "listProducts",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Filter by product category",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Electronics"
+            }
+          },
+          {
+            "name": "minPrice",
+            "in": "query",
+            "description": "Minimum price filter",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": 0,
+              "example": 10.0
+            }
+          },
+          {
+            "name": "maxPrice",
+            "in": "query",
+            "description": "Maximum price filter",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": 0,
+              "example": 500.0
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Search query for product name or description",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "wireless"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Number of items per page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "example": 20
+            }
+          },
+          {
+            "name": "nextToken",
+            "in": "query",
+            "description": "Pagination token from previous response",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - Invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Products"],
+        "summary": "Create a new product (Admin only)",
+        "description": "Create a new product in the catalog. Requires admin authentication.",
+        "operationId": "createProduct",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Product created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - Requires admin role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/{id}": {
+      "get": {
+        "tags": ["Products"],
+        "summary": "Get product details",
+        "description": "Retrieve detailed information about a specific product",
+        "operationId": "getProduct",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Product ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "prod-123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cart": {
+      "get": {
+        "tags": ["Cart"],
+        "summary": "Get shopping cart",
+        "description": "Retrieve the current user's shopping cart with all items and totals",
+        "operationId": "getCart",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Cart"],
+        "summary": "Add item to cart",
+        "description": "Add a product to the shopping cart or update quantity if already exists",
+        "operationId": "addToCart",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddToCartRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Item added/updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - Invalid input or insufficient inventory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/checkout/start": {
+      "post": {
+        "tags": ["Checkout"],
+        "summary": "Start checkout process",
+        "description": "Initiate checkout with payment and shipping details, create order and process payment",
+        "operationId": "startCheckout",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - Invalid input, empty cart, or insufficient inventory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required - Payment processing failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders": {
+      "get": {
+        "tags": ["Orders"],
+        "summary": "Get order history",
+        "description": "Retrieve the authenticated user's order history with pagination",
+        "operationId": "listOrders",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by order status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "processing", "shipped", "delivered", "cancelled"],
+              "example": "processing"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Number of orders per page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10,
+              "example": 10
+            }
+          },
+          {
+            "name": "nextToken",
+            "in": "query",
+            "description": "Pagination token from previous response",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token obtained from authentication endpoint"
+      }
+    },
+    "schemas": {
+      "Product": {
+        "type": "object",
+        "required": ["productId", "name", "price", "currency", "category", "inventory", "status"],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "Unique product identifier",
+            "example": "prod-123"
+          },
+          "name": {
+            "type": "string",
+            "description": "Product name",
+            "example": "Wireless Headphones"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed product description",
+            "example": "Premium noise-cancelling wireless headphones with 30-hour battery life"
+          },
+          "price": {
+            "type": "number",
+            "format": "float",
+            "description": "Product price",
+            "example": 199.99
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency code",
+            "example": "USD"
+          },
+          "category": {
+            "type": "string",
+            "description": "Product category",
+            "example": "Electronics"
+          },
+          "subCategory": {
+            "type": "string",
+            "description": "Product subcategory",
+            "example": "Audio"
+          },
+          "brand": {
+            "type": "string",
+            "description": "Product brand",
+            "example": "TechBrand"
+          },
+          "images": {
+            "type": "array",
+            "description": "Product image URLs",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "example": ["https://cdn.example.com/img1.jpg", "https://cdn.example.com/img2.jpg"]
+          },
+          "inventory": {
+            "type": "integer",
+            "description": "Available stock quantity",
+            "example": 50
+          },
+          "sku": {
+            "type": "string",
+            "description": "Stock keeping unit",
+            "example": "WH-123-BLK"
+          },
+          "attributes": {
+            "type": "object",
+            "description": "Product-specific attributes",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {
+              "color": "Black",
+              "weight": "250g",
+              "batteryLife": "30 hours"
+            }
+          },
+          "ratings": {
+            "type": "object",
+            "properties": {
+              "average": {
+                "type": "number",
+                "format": "float",
+                "example": 4.5
+              },
+              "count": {
+                "type": "integer",
+                "example": 128
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive", "discontinued"],
+            "example": "active"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-01-15T10:30:00Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-17T08:20:00Z"
+          }
+        }
+      },
+      "ProductListResponse": {
+        "type": "object",
+        "required": ["products", "count"],
+        "properties": {
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of products in current response",
+            "example": 20
+          },
+          "nextToken": {
+            "type": "string",
+            "description": "Token for next page of results",
+            "example": "eyJsYXN0S2V5Ijp7InByb2R1Y3RJZCI6InByb2QtMTIzIn19"
+          }
+        }
+      },
+      "CreateProductRequest": {
+        "type": "object",
+        "required": ["name", "price", "currency", "category", "inventory"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "example": "Wireless Headphones"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "example": "Premium noise-cancelling wireless headphones"
+          },
+          "price": {
+            "type": "number",
+            "format": "float",
+            "minimum": 0,
+            "example": 199.99
+          },
+          "currency": {
+            "type": "string",
+            "enum": ["USD", "EUR", "GBP"],
+            "example": "USD"
+          },
+          "category": {
+            "type": "string",
+            "example": "Electronics"
+          },
+          "subCategory": {
+            "type": "string",
+            "example": "Audio"
+          },
+          "brand": {
+            "type": "string",
+            "example": "TechBrand"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "example": ["https://cdn.example.com/img1.jpg"]
+          },
+          "inventory": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 50
+          },
+          "sku": {
+            "type": "string",
+            "example": "WH-123-BLK"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {
+              "color": "Black",
+              "weight": "250g"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive"],
+            "default": "active",
+            "example": "active"
+          }
+        }
+      },
+      "CartItem": {
+        "type": "object",
+        "required": ["productId", "productName", "quantity", "price", "currency"],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "example": "prod-123"
+          },
+          "productName": {
+            "type": "string",
+            "example": "Wireless Headphones"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "example": 2
+          },
+          "price": {
+            "type": "number",
+            "format": "float",
+            "example": 199.99
+          },
+          "currency": {
+            "type": "string",
+            "example": "USD"
+          },
+          "imageUrl": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://cdn.example.com/img1.jpg"
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-16T15:30:00Z"
+          }
+        }
+      },
+      "Cart": {
+        "type": "object",
+        "required": ["userId", "items", "totals", "updatedAt"],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "example": "user-456"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItem"
+            }
+          },
+          "totals": {
+            "type": "object",
+            "required": ["subtotal", "tax", "shipping", "total", "currency"],
+            "properties": {
+              "subtotal": {
+                "type": "number",
+                "format": "float",
+                "example": 438.95
+              },
+              "tax": {
+                "type": "number",
+                "format": "float",
+                "example": 35.12
+              },
+              "shipping": {
+                "type": "number",
+                "format": "float",
+                "example": 9.99
+              },
+              "total": {
+                "type": "number",
+                "format": "float",
+                "example": 484.06
+              },
+              "currency": {
+                "type": "string",
+                "example": "USD"
+              }
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-17T10:00:00Z"
+          }
+        }
+      },
+      "AddToCartRequest": {
+        "type": "object",
+        "required": ["productId", "quantity"],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "Product ID to add to cart",
+            "example": "prod-123"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Quantity to add",
+            "example": 2
+          }
+        }
+      },
+      "CheckoutRequest": {
+        "type": "object",
+        "required": ["paymentMethodId", "shippingAddress"],
+        "properties": {
+          "paymentMethodId": {
+            "type": "string",
+            "description": "ID of saved payment method or token from payment provider",
+            "example": "pm-1"
+          },
+          "shippingAddress": {
+            "type": "object",
+            "required": ["street", "city", "state", "zipCode", "country"],
+            "properties": {
+              "street": {
+                "type": "string",
+                "example": "123 Main St"
+              },
+              "city": {
+                "type": "string",
+                "example": "New York"
+              },
+              "state": {
+                "type": "string",
+                "example": "NY"
+              },
+              "zipCode": {
+                "type": "string",
+                "example": "10001"
+              },
+              "country": {
+                "type": "string",
+                "example": "USA"
+              }
+            }
+          },
+          "shippingMethod": {
+            "type": "string",
+            "enum": ["standard", "express", "overnight"],
+            "default": "standard",
+            "example": "standard"
+          }
+        }
+      },
+      "CheckoutResponse": {
+        "type": "object",
+        "required": ["orderId", "status", "total", "currency"],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "description": "Newly created order ID",
+            "example": "ord-7890"
+          },
+          "status": {
+            "type": "string",
+            "description": "Order status",
+            "example": "processing"
+          },
+          "total": {
+            "type": "number",
+            "format": "float",
+            "description": "Total order amount",
+            "example": 484.06
+          },
+          "currency": {
+            "type": "string",
+            "example": "USD"
+          },
+          "paymentStatus": {
+            "type": "string",
+            "enum": ["completed", "pending", "failed"],
+            "example": "completed"
+          },
+          "estimatedDelivery": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-22T00:00:00Z"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-17T11:30:00Z"
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "required": ["orderId", "userId", "status", "items", "totals", "createdAt"],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "example": "ord-7890"
+          },
+          "userId": {
+            "type": "string",
+            "example": "user-456"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "processing", "shipped", "delivered", "cancelled"],
+            "example": "processing"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItem"
+            }
+          },
+          "payment": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string",
+                "example": "card"
+              },
+              "transactionId": {
+                "type": "string",
+                "example": "ch_3abc123"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["completed", "pending", "failed"],
+                "example": "completed"
+              },
+              "amount": {
+                "type": "number",
+                "format": "float",
+                "example": 484.06
+              },
+              "currency": {
+                "type": "string",
+                "example": "USD"
+              }
+            }
+          },
+          "shipping": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "object",
+                "properties": {
+                  "street": {
+                    "type": "string",
+                    "example": "123 Main St"
+                  },
+                  "city": {
+                    "type": "string",
+                    "example": "New York"
+                  },
+                  "state": {
+                    "type": "string",
+                    "example": "NY"
+                  },
+                  "zipCode": {
+                    "type": "string",
+                    "example": "10001"
+                  },
+                  "country": {
+                    "type": "string",
+                    "example": "USA"
+                  }
+                }
+              },
+              "method": {
+                "type": "string",
+                "example": "standard"
+              },
+              "cost": {
+                "type": "number",
+                "format": "float",
+                "example": 9.99
+              },
+              "trackingNumber": {
+                "type": "string",
+                "example": "1Z999AA10123456784"
+              },
+              "estimatedDelivery": {
+                "type": "string",
+                "format": "date-time",
+                "example": "2025-11-22T00:00:00Z"
+              }
+            }
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "subtotal": {
+                "type": "number",
+                "format": "float",
+                "example": 438.95
+              },
+              "tax": {
+                "type": "number",
+                "format": "float",
+                "example": 35.12
+              },
+              "shipping": {
+                "type": "number",
+                "format": "float",
+                "example": 9.99
+              },
+              "total": {
+                "type": "number",
+                "format": "float",
+                "example": 484.06
+              },
+              "currency": {
+                "type": "string",
+                "example": "USD"
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-17T11:30:00Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-17T11:35:00Z"
+          }
+        }
+      },
+      "OrderListResponse": {
+        "type": "object",
+        "required": ["orders", "count"],
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Order"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of orders in current response",
+            "example": 10
+          },
+          "nextToken": {
+            "type": "string",
+            "description": "Token for next page of results"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error", "message"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error code",
+            "example": "INVALID_REQUEST"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message",
+            "example": "Invalid product ID format"
+          },
+          "details": {
+            "type": "object",
+            "description": "Additional error details",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}

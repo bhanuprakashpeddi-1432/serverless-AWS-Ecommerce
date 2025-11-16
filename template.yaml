@@ -1,0 +1,950 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless E-Commerce Application
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        PRODUCTS_TABLE: !Ref ProductsTable
+        USERS_TABLE: !Ref UsersTable
+        CARTS_TABLE: !Ref CartsTable
+        ORDERS_TABLE: !Ref OrdersTable
+        POWERTOOLS_SERVICE_NAME: ecommerce-api
+        LOG_LEVEL: INFO
+    Tracing: Active
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+Resources:
+  # ==================== DynamoDB Tables ====================
+  
+  ProductsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}-ecommerce-products
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: CategoryIndex
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}-ecommerce-users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: EmailIndex
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  CartsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}-ecommerce-carts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}-ecommerce-orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: OrderStatusIndex
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: OrderDateIndex
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  # ==================== S3 Buckets ====================
+  
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Environment}-ecommerce-frontend-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  ProductImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Environment}-ecommerce-images-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  # ==================== Lambda Functions ====================
+  
+  GetProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-get-products
+      CodeUri: backend/src/handlers/products/
+      Handler: get_products.handler
+      Description: List all products with filtering and pagination
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        GetProducts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /products
+            Method: GET
+      Tags:
+        Environment: !Ref Environment
+
+  GetProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-get-product
+      CodeUri: backend/src/handlers/products/
+      Handler: get_product.handler
+      Description: Get a single product by ID
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        GetProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /products/{id}
+            Method: GET
+      Tags:
+        Environment: !Ref Environment
+
+  CreateProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-create-product
+      CodeUri: backend/src/handlers/products/
+      Handler: create_product.handler
+      Description: Create a new product (Admin only)
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        CreateProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /products
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  UpdateProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-update-product
+      CodeUri: backend/src/handlers/products/
+      Handler: update_product.handler
+      Description: Update an existing product (Admin only)
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        UpdateProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /products/{id}
+            Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  DeleteProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-delete-product
+      CodeUri: backend/src/handlers/products/
+      Handler: delete_product.handler
+      Description: Delete a product (Admin only)
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        DeleteProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /products/{id}
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  GetCartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-get-cart
+      CodeUri: backend/src/handlers/cart/
+      Handler: get_cart.handler
+      Description: Get user's shopping cart
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        GetCart:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /cart
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  AddToCartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-add-to-cart
+      CodeUri: backend/src/handlers/cart/
+      Handler: add_to_cart.handler
+      Description: Add item to shopping cart
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        AddToCart:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /cart
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  UpdateCartItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-update-cart-item
+      CodeUri: backend/src/handlers/cart/
+      Handler: update_cart_item.handler
+      Description: Update cart item quantity
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        UpdateCartItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /cart/items/{productId}
+            Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  RemoveFromCartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-remove-from-cart
+      CodeUri: backend/src/handlers/cart/
+      Handler: remove_from_cart.handler
+      Description: Remove item from shopping cart
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+      Events:
+        RemoveFromCart:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /cart/items/{productId}
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  ClearCartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-clear-cart
+      CodeUri: backend/src/handlers/cart/
+      Handler: clear_cart.handler
+      Description: Clear all items from shopping cart
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+      Events:
+        ClearCart:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /cart
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  StartCheckoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-start-checkout
+      CodeUri: backend/src/handlers/checkout/
+      Handler: start_checkout.handler
+      Description: Start checkout process and create order
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref OrderProcessingStateMachine
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt OrderProcessingStateMachine.Name
+      Events:
+        StartCheckout:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /checkout/start
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  GetOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-get-orders
+      CodeUri: backend/src/handlers/orders/
+      Handler: get_orders.handler
+      Description: Get user's order history
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
+      Events:
+        GetOrders:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /orders
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  GetOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-get-order
+      CodeUri: backend/src/handlers/orders/
+      Handler: get_order.handler
+      Description: Get a specific order by ID
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
+      Events:
+        GetOrder:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: /orders/{id}
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Tags:
+        Environment: !Ref Environment
+
+  # ==================== API Gateway ====================
+  
+  EcommerceHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub ${Environment}-ecommerce-api
+      Description: E-Commerce REST API
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        MaxAge: 600
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              Audience:
+                - !Ref UserPoolClient
+              Issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+      Tags:
+        Environment: !Ref Environment
+
+  # ==================== Cognito ====================
+  
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${Environment}-ecommerce-users
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: false
+        - Name: given_name
+          Required: true
+          Mutable: true
+        - Name: family_name
+          Required: true
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UserPoolTags:
+        Environment: !Ref Environment
+        Application: ecommerce
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${Environment}-ecommerce-web-client
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub ${Environment}-ecommerce-${AWS::AccountId}
+      UserPoolId: !Ref UserPool
+
+  AdminUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      Description: Administrator users with full access
+      UserPoolId: !Ref UserPool
+      Precedence: 1
+
+  CustomerUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Customers
+      Description: Regular customer users
+      UserPoolId: !Ref UserPool
+      Precedence: 10
+
+  # ==================== Step Functions ====================
+  
+  OrderProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub ${Environment}-order-processing
+      DefinitionUri: state-machines/order-processing.asl.json
+      DefinitionSubstitutions:
+        ValidateInventoryFunctionArn: !GetAtt ValidateInventoryFunction.Arn
+        ProcessPaymentFunctionArn: !GetAtt ProcessPaymentFunction.Arn
+        UpdateInventoryFunctionArn: !GetAtt UpdateInventoryFunction.Arn
+        SendOrderConfirmationFunctionArn: !GetAtt SendOrderConfirmationFunction.Arn
+        OrdersTableName: !Ref OrdersTable
+      Role: !GetAtt StepFunctionsRole.Arn
+      Tracing:
+        Enabled: true
+      Tags:
+        Environment: !Ref Environment
+        Application: ecommerce
+
+  ValidateInventoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-validate-inventory
+      CodeUri: backend/src/handlers/workflows/
+      Handler: validate_inventory.handler
+      Description: Validate product inventory availability
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Tags:
+        Environment: !Ref Environment
+
+  ProcessPaymentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-process-payment
+      CodeUri: backend/src/handlers/workflows/
+      Handler: process_payment.handler
+      Description: Process payment with payment gateway
+      Environment:
+        Variables:
+          PAYMENT_GATEWAY_API_KEY: '{{resolve:secretsmanager:ecommerce/payment:SecretString:api_key}}'
+      Tags:
+        Environment: !Ref Environment
+
+  UpdateInventoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-update-inventory
+      CodeUri: backend/src/handlers/workflows/
+      Handler: update_inventory.handler
+      Description: Update product inventory after order
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+      Tags:
+        Environment: !Ref Environment
+
+  SendOrderConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Environment}-ecommerce-send-confirmation
+      CodeUri: backend/src/handlers/workflows/
+      Handler: send_confirmation.handler
+      Description: Send order confirmation email
+      Environment:
+        Variables:
+          FROM_EMAIL: !Ref NotificationFromEmail
+      Policies:
+        - SESCrudPolicy:
+            IdentityName: !Ref NotificationFromEmail
+      Tags:
+        Environment: !Ref Environment
+
+  NotificationFromEmail:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Environment}/ecommerce/notification-email
+      Type: String
+      Value: noreply@example.com
+      Description: Email address for order notifications
+
+  # ==================== IAM Roles ====================
+  
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Environment}-ecommerce-stepfunctions-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: InvokeLambdaFunctions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ValidateInventoryFunction.Arn
+                  - !GetAtt ProcessPaymentFunction.Arn
+                  - !GetAtt UpdateInventoryFunction.Arn
+                  - !GetAtt SendOrderConfirmationFunction.Arn
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt OrdersTable.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  # ==================== CloudWatch Logs ====================
+  
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/${Environment}-ecommerce-api
+      RetentionInDays: 30
+
+  # ==================== CloudFront Distribution (Optional) ====================
+  
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub OAI for ${Environment} e-commerce frontend
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub ${Environment} E-Commerce Frontend Distribution
+        DefaultRootObject: index.html
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          Compress: true
+          MinTTL: 0
+          DefaultTTL: 86400
+          MaxTTL: 31536000
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        PriceClass: PriceClass_100
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+# ==================== Outputs ====================
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${EcommerceHttpApi}.execute-api.${AWS::Region}.amazonaws.com
+    Export:
+      Name: !Sub ${Environment}-ecommerce-api-endpoint
+
+  ApiId:
+    Description: API Gateway ID
+    Value: !Ref EcommerceHttpApi
+    Export:
+      Name: !Sub ${Environment}-ecommerce-api-id
+
+  FrontendBucketName:
+    Description: S3 bucket name for frontend hosting
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub ${Environment}-ecommerce-frontend-bucket
+
+  FrontendDistributionDomain:
+    Description: CloudFront distribution domain name
+    Value: !GetAtt FrontendDistribution.DomainName
+    Export:
+      Name: !Sub ${Environment}-ecommerce-frontend-domain
+
+  FrontendDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref FrontendDistribution
+    Export:
+      Name: !Sub ${Environment}-ecommerce-frontend-distribution-id
+
+  ProductImagesBucketName:
+    Description: S3 bucket name for product images
+    Value: !Ref ProductImagesBucket
+    Export:
+      Name: !Sub ${Environment}-ecommerce-images-bucket
+
+  ProductsTableName:
+    Description: DynamoDB Products table name
+    Value: !Ref ProductsTable
+    Export:
+      Name: !Sub ${Environment}-ecommerce-products-table
+
+  UsersTableName:
+    Description: DynamoDB Users table name
+    Value: !Ref UsersTable
+    Export:
+      Name: !Sub ${Environment}-ecommerce-users-table
+
+  CartsTableName:
+    Description: DynamoDB Carts table name
+    Value: !Ref CartsTable
+    Export:
+      Name: !Sub ${Environment}-ecommerce-carts-table
+
+  OrdersTableName:
+    Description: DynamoDB Orders table name
+    Value: !Ref OrdersTable
+    Export:
+      Name: !Sub ${Environment}-ecommerce-orders-table
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+    Export:
+      Name: !Sub ${Environment}-ecommerce-user-pool-id
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+    Export:
+      Name: !Sub ${Environment}-ecommerce-user-pool-client-id
+
+  UserPoolDomain:
+    Description: Cognito User Pool Domain
+    Value: !Sub ${Environment}-ecommerce-${AWS::AccountId}
+    Export:
+      Name: !Sub ${Environment}-ecommerce-user-pool-domain
+
+  StateMachineArn:
+    Description: Order Processing State Machine ARN
+    Value: !Ref OrderProcessingStateMachine
+    Export:
+      Name: !Sub ${Environment}-ecommerce-state-machine-arn
+
+  Region:
+    Description: AWS Region
+    Value: !Ref AWS::Region
+    Export:
+      Name: !Sub ${Environment}-ecommerce-region
