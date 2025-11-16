@@ -1,0 +1,376 @@
+{
+  "Comment": "Order Processing Workflow - Validates inventory, processes payment, updates stock, and sends confirmation",
+  "StartAt": "ValidateInventory",
+  "States": {
+    "ValidateInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ValidateInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "items.$": "$.items"
+        }
+      },
+      "ResultPath": "$.inventoryResult",
+      "ResultSelector": {
+        "status.$": "$.Payload.status",
+        "message.$": "$.Payload.message",
+        "available.$": "$.Payload.available"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "InventoryValidationFailed"
+        }
+      ],
+      "Next": "CheckInventoryAvailable"
+    },
+    "CheckInventoryAvailable": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.inventoryResult.available",
+          "BooleanEquals": true,
+          "Next": "ProcessPayment"
+        }
+      ],
+      "Default": "InsufficientInventory"
+    },
+    "ProcessPayment": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ProcessPaymentFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "amount.$": "$.totals.total",
+          "currency.$": "$.totals.currency",
+          "paymentMethodId.$": "$.paymentMethodId"
+        }
+      },
+      "ResultPath": "$.paymentResult",
+      "ResultSelector": {
+        "status.$": "$.Payload.status",
+        "transactionId.$": "$.Payload.transactionId",
+        "message.$": "$.Payload.message"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "PaymentFailed"
+        }
+      ],
+      "Next": "CheckPaymentSuccess"
+    },
+    "CheckPaymentSuccess": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.paymentResult.status",
+          "StringEquals": "completed",
+          "Next": "UpdateInventory"
+        }
+      ],
+      "Default": "PaymentFailed"
+    },
+    "UpdateInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${UpdateInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "items.$": "$.items"
+        }
+      },
+      "ResultPath": "$.inventoryUpdateResult",
+      "ResultSelector": {
+        "status.$": "$.Payload.status",
+        "message.$": "$.Payload.message"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "InventoryUpdateFailed"
+        }
+      ],
+      "Next": "UpdateOrderStatus"
+    },
+    "UpdateOrderStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "PK": {
+            "S.$": "States.Format('USER#{}', $.userId)"
+          },
+          "SK": {
+            "S.$": "States.Format('ORDER#{}', $.orderId)"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #payment = :payment, updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#payment": "payment"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "processing"
+          },
+          ":payment": {
+            "M": {
+              "status": {
+                "S": "completed"
+              },
+              "transactionId": {
+                "S.$": "$.paymentResult.transactionId"
+              },
+              "method": {
+                "S": "card"
+              },
+              "amount": {
+                "N.$": "States.Format('{}', $.totals.total)"
+              },
+              "currency": {
+                "S.$": "$.totals.currency"
+              }
+            }
+          },
+          ":updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": "$.orderUpdateResult",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.AmazonDynamoDBException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "SendOrderConfirmation"
+    },
+    "SendOrderConfirmation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${SendOrderConfirmationFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "email.$": "$.email",
+          "items.$": "$.items",
+          "totals.$": "$.totals",
+          "shippingAddress.$": "$.shippingAddress"
+        }
+      },
+      "ResultPath": "$.notificationResult",
+      "ResultSelector": {
+        "status.$": "$.Payload.status",
+        "message.$": "$.Payload.message"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "OrderProcessingSuccess"
+    },
+    "OrderProcessingSuccess": {
+      "Type": "Succeed",
+      "OutputPath": "$"
+    },
+    "InsufficientInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "PK": {
+            "S.$": "States.Format('USER#{}', $.userId)"
+          },
+          "SK": {
+            "S.$": "States.Format('ORDER#{}', $.orderId)"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #error = :error, updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#error": "errorMessage"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "cancelled"
+          },
+          ":error": {
+            "S": "Insufficient inventory for one or more items"
+          },
+          ":updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "Next": "OrderProcessingFailed"
+    },
+    "InventoryValidationFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "PK": {
+            "S.$": "States.Format('USER#{}', $.userId)"
+          },
+          "SK": {
+            "S.$": "States.Format('ORDER#{}', $.orderId)"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #error = :error, updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#error": "errorMessage"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "failed"
+          },
+          ":error": {
+            "S": "Failed to validate inventory"
+          },
+          ":updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "Next": "OrderProcessingFailed"
+    },
+    "PaymentFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "PK": {
+            "S.$": "States.Format('USER#{}', $.userId)"
+          },
+          "SK": {
+            "S.$": "States.Format('ORDER#{}', $.orderId)"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #payment = :payment, updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#payment": "payment"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "failed"
+          },
+          ":payment": {
+            "M": {
+              "status": {
+                "S": "failed"
+              },
+              "message": {
+                "S": "Payment processing failed"
+              }
+            }
+          },
+          ":updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "Next": "OrderProcessingFailed"
+    },
+    "InventoryUpdateFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "PK": {
+            "S.$": "States.Format('USER#{}', $.userId)"
+          },
+          "SK": {
+            "S.$": "States.Format('ORDER#{}', $.orderId)"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #error = :error, updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#error": "errorMessage"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "pending_review"
+          },
+          ":error": {
+            "S": "Payment succeeded but inventory update failed - requires manual review"
+          },
+          ":updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "Next": "OrderProcessingFailed"
+    },
+    "OrderProcessingFailed": {
+      "Type": "Fail",
+      "Error": "OrderProcessingError",
+      "Cause": "Order processing workflow failed"
+    }
+  }
+}
