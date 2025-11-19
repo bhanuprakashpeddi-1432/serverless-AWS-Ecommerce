@@ -1,0 +1,364 @@
+name: Deploy Backend SAM Application
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'backend/**'
+      - 'template.yaml'
+      - 'samconfig.toml'
+      - 'state-machines/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: 'dev'
+
+env:
+  AWS_REGION: us-east-1
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+  SAM_CLI_VERSION: '1.105.0'
+
+jobs:
+  deploy:
+    name: Build and Deploy SAM Application
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment based on branch or input
+        id: set-env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "ENVIRONMENT=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "ENVIRONMENT=prod" >> $GITHUB_OUTPUT
+          else
+            echo "ENVIRONMENT=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/src/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          version: ${{ env.SAM_CLI_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-SAM-Deploy
+
+      - name: Validate SAM template
+        run: |
+          echo "🔍 Validating SAM template..."
+          sam validate --lint
+
+      - name: Install backend dependencies
+        working-directory: backend/src
+        run: |
+          if [ -f "package.json" ]; then
+            echo "📦 Installing Node.js dependencies..."
+            npm ci --production
+          fi
+          
+          if [ -f "requirements.txt" ]; then
+            echo "📦 Installing Python dependencies..."
+            pip install -r requirements.txt --target .
+          fi
+
+      - name: Run backend tests (if available)
+        working-directory: backend
+        run: |
+          if [ -f "package.json" ] && grep -q "\"test\"" package.json; then
+            echo "🧪 Running tests..."
+            npm test -- --passWithNoTests
+          else
+            echo "⏭️  No tests found, skipping..."
+          fi
+        continue-on-error: true
+
+      - name: SAM Build
+        run: |
+          echo "🏗️  Building SAM application..."
+          sam build \
+            --use-container \
+            --parallel \
+            --cached
+
+      - name: Get or create S3 deployment bucket
+        id: deployment-bucket
+        run: |
+          BUCKET_NAME="${{ steps.set-env.outputs.ENVIRONMENT }}-ecommerce-sam-deployments-${{ secrets.AWS_ACCOUNT_ID }}"
+          
+          # Check if bucket exists
+          if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "📦 Creating deployment bucket: ${BUCKET_NAME}"
+            aws s3 mb "s3://${BUCKET_NAME}" --region ${{ env.AWS_REGION }}
+            
+            # Enable versioning
+            aws s3api put-bucket-versioning \
+              --bucket "${BUCKET_NAME}" \
+              --versioning-configuration Status=Enabled
+            
+            # Block public access
+            aws s3api put-public-access-block \
+              --bucket "${BUCKET_NAME}" \
+              --public-access-block-configuration \
+                "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+            
+            # Enable encryption
+            aws s3api put-bucket-encryption \
+              --bucket "${BUCKET_NAME}" \
+              --server-side-encryption-configuration \
+                '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+            
+            echo "✅ Bucket created successfully"
+          else
+            echo "✅ Deployment bucket already exists: ${BUCKET_NAME}"
+          fi
+          
+          echo "BUCKET_NAME=${BUCKET_NAME}" >> $GITHUB_OUTPUT
+
+      - name: SAM Package
+        id: sam-package
+        run: |
+          echo "📦 Packaging SAM application..."
+          sam package \
+            --output-template-file packaged.yaml \
+            --s3-bucket ${{ steps.deployment-bucket.outputs.BUCKET_NAME }} \
+            --s3-prefix ${{ steps.set-env.outputs.ENVIRONMENT }}/packages \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Get deployment parameters
+        id: params
+        run: |
+          ENVIRONMENT="${{ steps.set-env.outputs.ENVIRONMENT }}"
+          STACK_NAME="${ENVIRONMENT}-ecommerce-stack"
+          
+          # Set stage-specific parameters
+          if [[ "$ENVIRONMENT" == "prod" ]]; then
+            STAGE="prod"
+            LOG_LEVEL="INFO"
+          else
+            STAGE="dev"
+            LOG_LEVEL="DEBUG"
+          fi
+          
+          echo "STACK_NAME=${STACK_NAME}" >> $GITHUB_OUTPUT
+          echo "STAGE=${STAGE}" >> $GITHUB_OUTPUT
+          echo "LOG_LEVEL=${LOG_LEVEL}" >> $GITHUB_OUTPUT
+
+      - name: SAM Deploy
+        id: sam-deploy
+        run: |
+          echo "🚀 Deploying SAM application..."
+          sam deploy \
+            --template-file packaged.yaml \
+            --stack-name ${{ steps.params.outputs.STACK_NAME }} \
+            --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+            --parameter-overrides \
+              Environment=${{ steps.set-env.outputs.ENVIRONMENT }} \
+              Stage=${{ steps.params.outputs.STAGE }} \
+            --no-fail-on-empty-changeset \
+            --no-confirm-changeset \
+            --region ${{ env.AWS_REGION }} \
+            --tags \
+              Environment=${{ steps.set-env.outputs.ENVIRONMENT }} \
+              Application=ecommerce \
+              ManagedBy=GitHubActions \
+              Repository=${{ github.repository }} \
+              Branch=${{ github.ref_name }} \
+              CommitSha=${{ github.sha }}
+
+      - name: Get CloudFormation outputs
+        id: cfn-outputs
+        if: success()
+        run: |
+          STACK_NAME="${{ steps.params.outputs.STACK_NAME }}"
+          
+          echo "📊 Retrieving stack outputs..."
+          
+          API_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+            --output text)
+          
+          USER_POOL_ID=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" \
+            --output text)
+          
+          USER_POOL_CLIENT_ID=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" \
+            --output text)
+          
+          FRONTEND_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text)
+          
+          CLOUDFRONT_URL=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendUrl'].OutputValue" \
+            --output text)
+          
+          echo "API_ENDPOINT=$API_ENDPOINT" >> $GITHUB_OUTPUT
+          echo "USER_POOL_ID=$USER_POOL_ID" >> $GITHUB_OUTPUT
+          echo "USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID" >> $GITHUB_OUTPUT
+          echo "FRONTEND_BUCKET=$FRONTEND_BUCKET" >> $GITHUB_OUTPUT
+          echo "CLOUDFRONT_URL=$CLOUDFRONT_URL" >> $GITHUB_OUTPUT
+
+      - name: Test API health
+        if: success()
+        run: |
+          echo "🏥 Testing API health endpoint..."
+          API_ENDPOINT="${{ steps.cfn-outputs.outputs.API_ENDPOINT }}"
+          
+          # Wait for API to be ready (up to 60 seconds)
+          for i in {1..12}; do
+            if curl -f -s "${API_ENDPOINT}/health" > /dev/null 2>&1; then
+              echo "✅ API is healthy!"
+              curl -s "${API_ENDPOINT}/health" | jq '.'
+              break
+            else
+              echo "⏳ Waiting for API to be ready... ($i/12)"
+              sleep 5
+            fi
+          done
+
+      - name: Create environment file artifact
+        if: success()
+        run: |
+          cat > backend-outputs.json << EOF
+          {
+            "environment": "${{ steps.set-env.outputs.ENVIRONMENT }}",
+            "stack_name": "${{ steps.params.outputs.STACK_NAME }}",
+            "api_endpoint": "${{ steps.cfn-outputs.outputs.API_ENDPOINT }}",
+            "user_pool_id": "${{ steps.cfn-outputs.outputs.USER_POOL_ID }}",
+            "user_pool_client_id": "${{ steps.cfn-outputs.outputs.USER_POOL_CLIENT_ID }}",
+            "frontend_bucket": "${{ steps.cfn-outputs.outputs.FRONTEND_BUCKET }}",
+            "cloudfront_url": "${{ steps.cfn-outputs.outputs.CLOUDFRONT_URL }}",
+            "aws_region": "${{ env.AWS_REGION }}",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit_sha": "${{ github.sha }}",
+            "commit_message": "${{ github.event.head_commit.message }}",
+            "deployed_by": "${{ github.actor }}"
+          }
+          EOF
+          
+          echo "📄 Backend outputs saved to backend-outputs.json"
+          cat backend-outputs.json | jq '.'
+
+      - name: Upload deployment artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-deployment-${{ steps.set-env.outputs.ENVIRONMENT }}-${{ github.sha }}
+          path: |
+            backend-outputs.json
+            packaged.yaml
+            .aws-sam/build.toml
+          retention-days: 30
+
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "🚀 Backend Deployment Complete!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📦 Environment: ${{ steps.set-env.outputs.ENVIRONMENT }}"
+          echo "📚 Stack Name: ${{ steps.params.outputs.STACK_NAME }}"
+          echo "🔗 API Endpoint: ${{ steps.cfn-outputs.outputs.API_ENDPOINT }}"
+          echo "🌐 CloudFront URL: ${{ steps.cfn-outputs.outputs.CLOUDFRONT_URL }}"
+          echo "👤 User Pool ID: ${{ steps.cfn-outputs.outputs.USER_POOL_ID }}"
+          echo "🔑 Client ID: ${{ steps.cfn-outputs.outputs.USER_POOL_CLIENT_ID }}"
+          echo "🪣 Frontend Bucket: ${{ steps.cfn-outputs.outputs.FRONTEND_BUCKET }}"
+          echo "🌍 Region: ${{ env.AWS_REGION }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Create GitHub deployment
+        if: success()
+        uses: chrnorm/deployment-action@v2
+        with:
+          token: ${{ github.token }}
+          environment: ${{ steps.set-env.outputs.ENVIRONMENT }}
+          environment-url: ${{ steps.cfn-outputs.outputs.CLOUDFRONT_URL }}
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Backend deployment failed!"
+          echo "Check the logs for details."
+          echo "Stack: ${{ steps.params.outputs.STACK_NAME }}"
+          echo "Environment: ${{ steps.set-env.outputs.ENVIRONMENT }}"
+          exit 1
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check if rollback is needed
+        id: check-rollback
+        run: |
+          STACK_NAME="${{ needs.deploy.outputs.STACK_NAME }}"
+          
+          # Check stack status
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          
+          echo "Stack status: $STACK_STATUS"
+          
+          if [[ "$STACK_STATUS" == *"ROLLBACK"* ]] || [[ "$STACK_STATUS" == *"FAILED"* ]]; then
+            echo "NEEDS_ROLLBACK=true" >> $GITHUB_OUTPUT
+          else
+            echo "NEEDS_ROLLBACK=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Rollback to previous version
+        if: steps.check-rollback.outputs.NEEDS_ROLLBACK == 'true'
+        run: |
+          echo "⚠️  Rolling back failed deployment..."
+          # Manual intervention required - CloudFormation will auto-rollback
+          echo "CloudFormation will automatically rollback to the previous stable version."

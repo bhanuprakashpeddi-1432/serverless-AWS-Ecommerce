@@ -1,0 +1,534 @@
+{
+  "Comment": "Production Order Processing Workflow with comprehensive error handling and compensation",
+  "StartAt": "CheckInventory",
+  "States": {
+    "CheckInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Comment": "Validate that all items are in stock",
+      "Parameters": {
+        "FunctionName": "${CheckInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items",
+          "idempotencyId.$": "$.idempotencyId"
+        }
+      },
+      "ResultPath": "$.inventoryCheck",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "Comment": "Retry AWS service errors with exponential backoff"
+        },
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 1.5,
+          "Comment": "Retry transient failures"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["InsufficientStockError"],
+          "ResultPath": "$.error",
+          "Next": "InsufficientInventory",
+          "Comment": "Cannot proceed if inventory unavailable"
+        },
+        {
+          "ErrorEquals": ["InventoryError"],
+          "ResultPath": "$.error",
+          "Next": "InventoryCheckFailed",
+          "Comment": "Inventory validation failed"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "InventoryCheckFailed",
+          "Comment": "Catch all other errors"
+        }
+      ],
+      "Next": "ReserveInventory",
+      "TimeoutSeconds": 30
+    },
+
+    "ReserveInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Comment": "Atomically reserve inventory with DynamoDB transactions",
+      "Parameters": {
+        "FunctionName": "${ReserveInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items",
+          "idempotencyId.$": "$.idempotencyId"
+        }
+      },
+      "ResultPath": "$.inventoryReservation",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "ProvisionedThroughputExceededException",
+            "ThrottlingException",
+            "RequestLimitExceeded"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 5,
+          "BackoffRate": 2,
+          "Comment": "Retry DynamoDB throttling with aggressive backoff"
+        },
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "Comment": "Retry Lambda service errors"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["InsufficientStockError"],
+          "ResultPath": "$.error",
+          "Next": "InsufficientInventory",
+          "Comment": "Stock became unavailable between check and reserve"
+        },
+        {
+          "ErrorEquals": ["InventoryError"],
+          "ResultPath": "$.error",
+          "Next": "ReservationFailed",
+          "Comment": "Failed to reserve inventory"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ReservationFailed",
+          "Comment": "Catch all reservation errors"
+        }
+      ],
+      "Next": "ProcessPayment",
+      "TimeoutSeconds": 30
+    },
+
+    "ProcessPayment": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Comment": "Process payment via Stripe with 3DS support",
+      "Parameters": {
+        "FunctionName": "${ProcessPaymentFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "amount.$": "$.pricing.total",
+          "currency": "usd",
+          "paymentMethodId.$": "$.paymentMethodId",
+          "idempotencyKey.$": "$.idempotencyId",
+          "metadata": {
+            "orderId.$": "$.orderId",
+            "userId.$": "$.userId"
+          }
+        }
+      },
+      "ResultPath": "$.payment",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2,
+          "Comment": "Limited retries for payment to avoid duplicate charges"
+        },
+        {
+          "ErrorEquals": ["States.Timeout"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 1,
+          "Comment": "Single retry on timeout"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "PaymentDeclined",
+            "InsufficientFunds",
+            "CardError"
+          ],
+          "ResultPath": "$.error",
+          "Next": "ReleaseReservedInventory",
+          "Comment": "Payment failed - release inventory"
+        },
+        {
+          "ErrorEquals": ["PaymentFailed"],
+          "ResultPath": "$.error",
+          "Next": "ReleaseReservedInventory",
+          "Comment": "General payment failure"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ReleaseReservedInventory",
+          "Comment": "Catch all payment errors and compensate"
+        }
+      ],
+      "Next": "CreateOrderRecord",
+      "TimeoutSeconds": 60
+    },
+
+    "CreateOrderRecord": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Comment": "Create final order record with CONFIRMED status",
+      "Parameters": {
+        "FunctionName": "${CreateOrderRecordFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items",
+          "pricing.$": "$.pricing",
+          "shippingAddress.$": "$.shippingAddress",
+          "paymentMethod.$": "$.paymentMethod",
+          "payment.$": "$.payment",
+          "inventoryReservation.$": "$.inventoryReservation",
+          "createdAt.$": "$.createdAt",
+          "idempotencyId.$": "$.idempotencyId"
+        }
+      },
+      "ResultPath": "$.orderRecord",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "ProvisionedThroughputExceededException",
+            "ThrottlingException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 5,
+          "BackoffRate": 2,
+          "Comment": "Retry DynamoDB throttling"
+        },
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "Comment": "Retry Lambda errors"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["OrderRecordError"],
+          "ResultPath": "$.error",
+          "Next": "RefundPaymentAndRelease",
+          "Comment": "Order record failed - refund and release inventory"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "RefundPaymentAndRelease",
+          "Comment": "Critical failure after payment - compensate"
+        }
+      ],
+      "Next": "NotifyCustomer",
+      "TimeoutSeconds": 30
+    },
+
+    "NotifyCustomer": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Comment": "Send order confirmation email and SMS",
+      "Parameters": {
+        "FunctionName": "${NotifyCustomerFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "email.$": "$.email",
+          "phoneNumber.$": "$.phoneNumber",
+          "items.$": "$.items",
+          "pricing.$": "$.pricing",
+          "shippingAddress.$": "$.shippingAddress"
+        }
+      },
+      "ResultPath": "$.notification",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "Comment": "Retry notification failures"
+        },
+        {
+          "ErrorEquals": ["Throttling"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "Comment": "Retry SES/SNS throttling"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.notificationError",
+          "Next": "OrderSuccess",
+          "Comment": "Continue even if notification fails - order already confirmed"
+        }
+      ],
+      "Next": "OrderSuccess",
+      "TimeoutSeconds": 45
+    },
+
+    "OrderSuccess": {
+      "Type": "Succeed",
+      "Comment": "Order processing completed successfully"
+    },
+
+    "ReleaseReservedInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Comment": "Compensating action: Release inventory after payment failure",
+      "Parameters": {
+        "FunctionName": "${ReleaseInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items",
+          "action": "release",
+          "reason": "Payment failed",
+          "idempotencyId.$": "States.Format('{}-release', $.idempotencyId)"
+        }
+      },
+      "ResultPath": "$.inventoryRelease",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "Comment": "Retry release operations"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.releaseError",
+          "Next": "PaymentFailedFinal",
+          "Comment": "Continue even if release fails - log for manual review"
+        }
+      ],
+      "Next": "PaymentFailedFinal",
+      "TimeoutSeconds": 30
+    },
+
+    "RefundPaymentAndRelease": {
+      "Type": "Parallel",
+      "Comment": "Compensate by refunding payment and releasing inventory in parallel",
+      "Branches": [
+        {
+          "StartAt": "RefundPayment",
+          "States": {
+            "RefundPayment": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${RefundPaymentFunctionArn}",
+                "Payload": {
+                  "orderId.$": "$.orderId",
+                  "paymentIntentId.$": "$.payment.result.paymentId",
+                  "amount.$": "$.pricing.total",
+                  "reason": "Order creation failed",
+                  "idempotencyKey.$": "States.Format('{}-refund', $.idempotencyId)"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException"
+                  ],
+                  "IntervalSeconds": 3,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.refundError",
+                  "Next": "RefundComplete"
+                }
+              ],
+              "Next": "RefundComplete",
+              "TimeoutSeconds": 60
+            },
+            "RefundComplete": {
+              "Type": "Succeed"
+            }
+          }
+        },
+        {
+          "StartAt": "ReleaseInventory",
+          "States": {
+            "ReleaseInventory": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${ReleaseInventoryFunctionArn}",
+                "Payload": {
+                  "orderId.$": "$.orderId",
+                  "userId.$": "$.userId",
+                  "items.$": "$.items",
+                  "action": "release",
+                  "reason": "Order creation failed after payment",
+                  "idempotencyKey.$": "States.Format('{}-release-critical', $.idempotencyId)"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.releaseError",
+                  "Next": "ReleaseComplete"
+                }
+              ],
+              "Next": "ReleaseComplete",
+              "TimeoutSeconds": 30
+            },
+            "ReleaseComplete": {
+              "Type": "Succeed"
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.compensation",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.compensationError",
+          "Next": "OrderFailedCritical"
+        }
+      ],
+      "Next": "OrderFailedWithCompensation"
+    },
+
+    "InsufficientInventory": {
+      "Type": "Pass",
+      "Comment": "Inventory not available - no compensation needed",
+      "Result": {
+        "status": "CANCELLED",
+        "reason": "Insufficient inventory"
+      },
+      "ResultPath": "$.orderStatus",
+      "Next": "OrderFailedFinal"
+    },
+
+    "InventoryCheckFailed": {
+      "Type": "Pass",
+      "Comment": "Inventory check failed - no compensation needed",
+      "Result": {
+        "status": "FAILED",
+        "reason": "Inventory check failed"
+      },
+      "ResultPath": "$.orderStatus",
+      "Next": "OrderFailedFinal"
+    },
+
+    "ReservationFailed": {
+      "Type": "Pass",
+      "Comment": "Inventory reservation failed - no compensation needed",
+      "Result": {
+        "status": "FAILED",
+        "reason": "Failed to reserve inventory"
+      },
+      "ResultPath": "$.orderStatus",
+      "Next": "OrderFailedFinal"
+    },
+
+    "PaymentFailedFinal": {
+      "Type": "Pass",
+      "Comment": "Payment failed, inventory released",
+      "Result": {
+        "status": "FAILED",
+        "reason": "Payment processing failed"
+      },
+      "ResultPath": "$.orderStatus",
+      "Next": "OrderFailedFinal"
+    },
+
+    "OrderFailedWithCompensation": {
+      "Type": "Pass",
+      "Comment": "Order failed after payment, compensation attempted",
+      "Result": {
+        "status": "FAILED_COMPENSATED",
+        "reason": "Order creation failed, payment refunded and inventory released"
+      },
+      "ResultPath": "$.orderStatus",
+      "Next": "OrderFailedFinal"
+    },
+
+    "OrderFailedCritical": {
+      "Type": "Pass",
+      "Comment": "Critical failure - manual review required",
+      "Result": {
+        "status": "FAILED_CRITICAL",
+        "reason": "Order failed and compensation incomplete - requires manual review"
+      },
+      "ResultPath": "$.orderStatus",
+      "Next": "OrderFailedFinal"
+    },
+
+    "OrderFailedFinal": {
+      "Type": "Fail",
+      "Error": "OrderProcessingFailed",
+      "Cause": "Order processing workflow failed"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "orderId": "ORDER#1234567890-abc123",
+  "userId": "user-123-456-789",
+  "idempotencyId": "release-inventory-1234567890",
+  "action": "release",
+  "items": [
+    {
+      "productId": "123",
+      "productName": "Test Product",
+      "quantity": 2
+    },
+    {
+      "productId": "456",
+      "productName": "Another Product",
+      "quantity": 1
+    }
+  ]
+}

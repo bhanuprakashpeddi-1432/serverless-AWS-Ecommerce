@@ -12,7 +12,7 @@ function Header() {
           <h1>E-Commerce Store</h1>
         </Link>
         
-        <nav className="nav">
+        <nav className="nav" aria-label="Primary">
           <Link to="/" className="nav-link">Home</Link>
           <Link to="/cart" className="nav-link">Cart</Link>
           
@@ -27,7 +27,9 @@ function Header() {
               </button>
             </>
           ) : (
-            <button className="btn-primary">Sign In</button>
+            <button className="btn-primary" type="button" aria-label="Sign in">
+              Sign In
+            </button>
           )}
         </nav>
       </div>

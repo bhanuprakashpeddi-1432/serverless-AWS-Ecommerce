@@ -1,0 +1,26 @@
+{
+  "name": "inventory-handlers",
+  "version": "1.0.0",
+  "description": "Lambda handlers for inventory management with atomic operations",
+  "main": "checkInventory.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "lambda",
+    "inventory",
+    "dynamodb",
+    "transactions",
+    "aws",
+    "serverless"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.450.0",
+    "@aws-sdk/lib-dynamodb": "^3.450.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "orderId": "ORDER#1234567890-abc123",
+  "userId": "user-123-456-789",
+  "idempotencyId": "check-inventory-1234567890",
+  "items": [
+    {
+      "productId": "123",
+      "productName": "Test Product",
+      "quantity": 2,
+      "price": 29.99
+    },
+    {
+      "productId": "456",
+      "productName": "Another Product",
+      "quantity": 1,
+      "price": 49.99
+    }
+  ]
+}

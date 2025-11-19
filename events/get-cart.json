@@ -1,0 +1,21 @@
+{
+  "httpMethod": "GET",
+  "path": "/cart",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer mock-token"
+  },
+  "requestContext": {
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "user-123-456-789",
+          "cognito:username": "testuser",
+          "email": "test@example.com"
+        }
+      }
+    }
+  },
+  "body": null,
+  "isBase64Encoded": false
+}

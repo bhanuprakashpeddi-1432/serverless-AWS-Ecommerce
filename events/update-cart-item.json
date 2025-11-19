@@ -1,0 +1,24 @@
+{
+  "httpMethod": "PUT",
+  "path": "/cart/items/123",
+  "pathParameters": {
+    "productId": "123"
+  },
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer mock-token"
+  },
+  "requestContext": {
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "user-123-456-789",
+          "cognito:username": "testuser",
+          "email": "test@example.com"
+        }
+      }
+    }
+  },
+  "body": "{\"quantity\":5}",
+  "isBase64Encoded": false
+}

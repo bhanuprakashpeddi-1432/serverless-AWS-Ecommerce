@@ -38,6 +38,8 @@
 3. **`docs/API-README.md`** - API quick reference
 4. **`SAM-DEPLOYMENT.md`** - Detailed deployment guide
 5. **`SAM-TEMPLATE-SUMMARY.md`** - Template overview
+6. **`docs/DEMO-SCRIPT.md`** - 5‑minute end‑to‑end demo script
+7. **`docs/DEMO-CHECKLIST.md`** - Demo readiness and run checklist
 
 ## 🎯 Template Features
 

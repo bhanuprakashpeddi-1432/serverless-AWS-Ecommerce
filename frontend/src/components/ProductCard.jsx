@@ -3,11 +3,18 @@ import './ProductCard.css'
 
 function ProductCard({ product }) {
   return (
-    <Link to={`/products/${product.productId || product.id}`} className="product-card">
+    <Link
+      to={`/products/${product.productId || product.id}`}
+      className="product-card"
+      aria-label={`View details for ${product.name} priced at $${product.price?.toFixed(2)}`}
+    >
       <div className="product-image">
         <img 
           src={product.imageUrl || 'https://via.placeholder.com/300'} 
-          alt={product.name}
+          alt={`${product.name} — ${product.category || 'product'}`}
+          loading="lazy"
+          width="300"
+          height="225"
         />
       </div>
       <div className="product-details">

@@ -1,0 +1,33 @@
+{
+  "orderId": "ORDER#1234567890-abc123",
+  "userId": "user-123-456-789",
+  "email": "customer@example.com",
+  "phoneNumber": "+12065551234",
+  "items": [
+    {
+      "productId": "123",
+      "productName": "Premium Wireless Headphones",
+      "quantity": 1,
+      "price": 89.99
+    },
+    {
+      "productId": "456",
+      "productName": "USB-C Charging Cable",
+      "quantity": 2,
+      "price": 14.99
+    }
+  ],
+  "pricing": {
+    "subtotal": 119.97,
+    "tax": 9.60,
+    "shipping": 0,
+    "total": 129.57
+  },
+  "shippingAddress": {
+    "street": "123 Main Street, Apt 4B",
+    "city": "Seattle",
+    "state": "WA",
+    "zipCode": "98101",
+    "country": "US"
+  }
+}

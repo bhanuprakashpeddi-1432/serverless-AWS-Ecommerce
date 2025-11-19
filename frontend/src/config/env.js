@@ -5,3 +5,7 @@ export const COGNITO_CONFIG = {
   clientId: import.meta.env.VITE_COGNITO_CLIENT_ID,
   region: import.meta.env.VITE_COGNITO_REGION || 'us-east-1',
 }
+
+// Debug: Log configuration on load (remove in production)
+console.log('API_BASE_URL:', API_BASE_URL)
+console.log('COGNITO_CONFIG:', COGNITO_CONFIG)

@@ -693,10 +693,7 @@ Resources:
       FunctionName: !Sub ${Environment}-ecommerce-process-payment
       CodeUri: backend/src/handlers/workflows/
       Handler: process_payment.handler
-      Description: Process payment with payment gateway
-      Environment:
-        Variables:
-          PAYMENT_GATEWAY_API_KEY: '{{resolve:secretsmanager:ecommerce/payment:SecretString:api_key}}'
+      Description: Process payment (dummy implementation for demo)
       Tags:
         Environment: !Ref Environment
 
@@ -792,13 +789,13 @@ Resources:
       LogGroupName: !Sub /aws/apigateway/${Environment}-ecommerce-api
       RetentionInDays: 30
 
-  # ==================== CloudFront Distribution (Optional) ====================
+  # ==================== CloudFront Distribution ====================
   
   CloudFrontOriginAccessIdentity:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
     Properties:
       CloudFrontOriginAccessIdentityConfig:
-        Comment: !Sub OAI for ${Environment} e-commerce frontend
+        Comment: !Sub OAI for ${Environment} e-commerce frontend bucket
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -806,7 +803,8 @@ Resources:
       Bucket: !Ref FrontendBucket
       PolicyDocument:
         Statement:
-          - Effect: Allow
+          - Sid: AllowCloudFrontAccess
+            Effect: Allow
             Principal:
               CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
             Action: s3:GetObject
@@ -817,6 +815,7 @@ Resources:
     Properties:
       DistributionConfig:
         Enabled: true
+        HttpVersion: http2and3
         Comment: !Sub ${Environment} E-Commerce Frontend Distribution
         DefaultRootObject: index.html
         Origins:
@@ -824,6 +823,8 @@ Resources:
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
             S3OriginConfig:
               OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}
+            OriginShield:
+              Enabled: false
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
@@ -834,22 +835,178 @@ Resources:
           CachedMethods:
             - GET
             - HEAD
-          ForwardedValues:
-            QueryString: false
-            Cookies:
-              Forward: none
+            - OPTIONS
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # Managed-CORS-S3Origin
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03  # Managed-SecurityHeadersPolicy
           Compress: true
-          MinTTL: 0
-          DefaultTTL: 86400
-          MaxTTL: 31536000
+        CacheBehaviors:
+          # Cache static assets (JS, CSS, images) with longer TTL
+          - PathPattern: /assets/*
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # Managed-CORS-S3Origin
+            Compress: true
+          # Don't cache index.html to ensure latest version is served
+          - PathPattern: /index.html
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+            CachedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed-CachingDisabled
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # Managed-CORS-S3Origin
+            Compress: true
         CustomErrorResponses:
+          # SPA routing - serve index.html for 403/404 errors
           - ErrorCode: 403
             ResponseCode: 200
             ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 60
           - ErrorCode: 404
             ResponseCode: 200
             ResponsePagePath: /index.html
-        PriceClass: PriceClass_100
+            ErrorCachingMinTTL: 60
+        PriceClass: PriceClass_100  # Use only North America and Europe
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1.2_2021
+        Logging:
+          Bucket: !GetAtt CloudFrontLogsBucket.DomainName
+          Prefix: !Sub ${Environment}-frontend/
+          IncludeCookies: false
+        WebACLId: !GetAtt WebACL.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  # CloudFront Logs Bucket
+  CloudFrontLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Environment}-ecommerce-cloudfront-logs-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 90
+            NoncurrentVersionExpirationInDays: 7
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: ecommerce
+
+  CloudFrontLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudFrontLogsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontLogs
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${CloudFrontLogsBucket.Arn}/*
+            Condition:
+              StringEquals:
+                'AWS:SourceAccount': !Ref AWS::AccountId
+
+  # WAF Web ACL for CloudFront
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub ${Environment}-ecommerce-cloudfront-waf
+      Scope: CLOUDFRONT
+      Description: Web ACL for E-Commerce CloudFront distribution
+      DefaultAction:
+        Allow: {}
+      Rules:
+        # Rate limiting - 2000 requests per 5 minutes per IP
+        - Name: RateLimitRule
+          Priority: 1
+          Statement:
+            RateBasedStatement:
+              Limit: 2000
+              AggregateKeyType: IP
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitRule
+        # Block common attacks
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+        # Block known bad inputs
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 3
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesKnownBadInputsRuleSet
+        # Block anonymous IPs (VPN, proxies, Tor)
+        - Name: AWSManagedRulesAnonymousIpList
+          Priority: 4
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAnonymousIpList
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesAnonymousIpList
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub ${Environment}EcommerceWebACL
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -883,11 +1040,29 @@ Outputs:
     Export:
       Name: !Sub ${Environment}-ecommerce-frontend-domain
 
+  FrontendUrl:
+    Description: Frontend application URL
+    Value: !Sub https://${FrontendDistribution.DomainName}
+    Export:
+      Name: !Sub ${Environment}-ecommerce-frontend-url
+
   FrontendDistributionId:
-    Description: CloudFront distribution ID
+    Description: CloudFront distribution ID (for cache invalidation)
     Value: !Ref FrontendDistribution
     Export:
       Name: !Sub ${Environment}-ecommerce-frontend-distribution-id
+
+  CloudFrontLogsBucketName:
+    Description: S3 bucket name for CloudFront access logs
+    Value: !Ref CloudFrontLogsBucket
+    Export:
+      Name: !Sub ${Environment}-ecommerce-cloudfront-logs-bucket
+
+  WebACLArn:
+    Description: WAF Web ACL ARN for CloudFront
+    Value: !GetAtt WebACL.Arn
+    Export:
+      Name: !Sub ${Environment}-ecommerce-web-acl-arn
 
   ProductImagesBucketName:
     Description: S3 bucket name for product images

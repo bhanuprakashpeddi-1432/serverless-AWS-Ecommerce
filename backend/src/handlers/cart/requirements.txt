@@ -1,0 +1,4 @@
+# AWS Lambda Python Dependencies for Cart Functions
+boto3>=1.34.0
+aws-lambda-powertools>=2.30.0
+pydantic>=2.5.0

@@ -1,0 +1,25 @@
+{
+  "name": "cart-handlers",
+  "version": "1.0.0",
+  "description": "Lambda handlers for cart operations in DynamoDB",
+  "main": "getCart.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "lambda",
+    "dynamodb",
+    "cart",
+    "aws",
+    "serverless"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.450.0",
+    "@aws-sdk/lib-dynamodb": "^3.450.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

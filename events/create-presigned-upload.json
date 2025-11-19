@@ -1,0 +1,10 @@
+{
+  "httpMethod": "POST",
+  "path": "/products/upload-url",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer mock-token"
+  },
+  "body": "{\"filename\":\"product-image.jpg\",\"contentType\":\"image/jpeg\",\"fileSize\":2048000}",
+  "isBase64Encoded": false
+}

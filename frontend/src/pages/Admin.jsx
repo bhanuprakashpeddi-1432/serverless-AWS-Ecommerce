@@ -1,20 +1,19 @@
 import { useState, useEffect } from 'react'
 import { productsApi } from '../services/api'
+import { ProductForm } from '../components/ProductForm'
+import { useAuth } from '../components/AuthProvider'
 import './Admin.css'
 
 function Admin() {
+  const { user } = useAuth()
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [editingProduct, setEditingProduct] = useState(null)
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    price: '',
-    stock: '',
-    category: '',
-    imageUrl: '',
-  })
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
+  const [sortBy, setSortBy] = useState('name')
 
   useEffect(() => {
     fetchProducts()
@@ -23,75 +22,43 @@ function Admin() {
   const fetchProducts = async () => {
     try {
       setLoading(true)
+      setError(null)
       const response = await productsApi.getAll()
-      setProducts(response.data)
+      setProducts(response.data.items || response.data || [])
     } catch (err) {
       console.error('Error fetching products:', err)
+      setError(err.response?.data?.message || 'Failed to load products')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    })
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    try {
-      const data = {
-        ...formData,
-        price: parseFloat(formData.price),
-        stock: parseInt(formData.stock),
-      }
-
-      if (editingProduct) {
-        await productsApi.update(editingProduct.productId, data)
-      } else {
-        await productsApi.create(data)
-      }
-
-      setShowForm(false)
-      setEditingProduct(null)
-      setFormData({
-        name: '',
-        description: '',
-        price: '',
-        stock: '',
-        category: '',
-        imageUrl: '',
-      })
-      fetchProducts()
-    } catch (err) {
-      console.error('Error saving product:', err)
-      alert('Failed to save product.')
-    }
+  const handleAddNew = () => {
+    setEditingProduct(null)
+    setShowForm(true)
   }
 
   const handleEdit = (product) => {
     setEditingProduct(product)
-    setFormData({
-      name: product.name,
-      description: product.description,
-      price: product.price.toString(),
-      stock: product.stock.toString(),
-      category: product.category || '',
-      imageUrl: product.imageUrl || '',
-    })
     setShowForm(true)
   }
 
-  const handleDelete = async (productId) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
+  const handleFormSuccess = () => {
+    setShowForm(false)
+    setEditingProduct(null)
+    fetchProducts()
+  }
+
+  const handleDelete = async (product) => {
+    const confirmMessage = `Are you sure you want to delete "${product.name}"?\n\nThis action cannot be undone.`
+    
+    if (window.confirm(confirmMessage)) {
       try {
-        await productsApi.delete(productId)
+        await productsApi.delete(product.productId)
         fetchProducts()
       } catch (err) {
         console.error('Error deleting product:', err)
-        alert('Failed to delete product.')
+        alert(err.response?.data?.message || 'Failed to delete product.')
       }
     }
   }
@@ -99,142 +66,213 @@ function Admin() {
   const handleCancel = () => {
     setShowForm(false)
     setEditingProduct(null)
-    setFormData({
-      name: '',
-      description: '',
-      price: '',
-      stock: '',
-      category: '',
-      imageUrl: '',
-    })
   }
+
+  // Filter and sort products
+  const getFilteredProducts = () => {
+    let filtered = [...products]
+
+    // Search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      filtered = filtered.filter(p => 
+        p.name?.toLowerCase().includes(term) ||
+        p.description?.toLowerCase().includes(term) ||
+        p.category?.toLowerCase().includes(term)
+      )
+    }
+
+    // Category filter
+    if (filterCategory) {
+      filtered = filtered.filter(p => p.category === filterCategory)
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'name':
+          return (a.name || '').localeCompare(b.name || '')
+        case 'price-asc':
+          return (a.price || 0) - (b.price || 0)
+        case 'price-desc':
+          return (b.price || 0) - (a.price || 0)
+        case 'stock-asc':
+          return (a.stock || 0) - (b.stock || 0)
+        case 'stock-desc':
+          return (b.stock || 0) - (a.stock || 0)
+        default:
+          return 0
+      }
+    })
+
+    return filtered
+  }
+
+  const filteredProducts = getFilteredProducts()
+  const categories = [...new Set(products.map(p => p.category).filter(Boolean))]
 
   return (
     <div className="admin">
       <div className="admin-header">
-        <h1>Admin Dashboard</h1>
+        <div className="header-content">
+          <h1>Admin Dashboard</h1>
+          <p className="welcome-text">Welcome, {user?.name || user?.email}</p>
+        </div>
         <button
           className="btn-primary"
-          onClick={() => setShowForm(!showForm)}
+          onClick={handleAddNew}
+          disabled={showForm}
         >
-          {showForm ? 'Cancel' : '+ Add Product'}
+          + Add Product
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="product-form">
-          <h2>{editingProduct ? 'Edit Product' : 'Add New Product'}</h2>
-          <div className="form-group">
-            <label>Name</label>
-            <input
-              type="text"
-              name="name"
-              value={formData.name}
-              onChange={handleChange}
-              required
+        <div className="form-modal">
+          <div className="form-modal-content">
+            <ProductForm
+              product={editingProduct}
+              onSuccess={handleFormSuccess}
+              onCancel={handleCancel}
             />
           </div>
-          <div className="form-group">
-            <label>Description</label>
-            <textarea
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              required
-            />
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Price</label>
-              <input
-                type="number"
-                name="price"
-                value={formData.price}
-                onChange={handleChange}
-                step="0.01"
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Stock</label>
-              <input
-                type="number"
-                name="stock"
-                value={formData.stock}
-                onChange={handleChange}
-                required
-              />
-            </div>
-          </div>
-          <div className="form-group">
-            <label>Category</label>
-            <input
-              type="text"
-              name="category"
-              value={formData.category}
-              onChange={handleChange}
-            />
-          </div>
-          <div className="form-group">
-            <label>Image URL</label>
-            <input
-              type="url"
-              name="imageUrl"
-              value={formData.imageUrl}
-              onChange={handleChange}
-            />
-          </div>
-          <div className="form-actions">
-            <button type="submit" className="btn-primary">
-              {editingProduct ? 'Update' : 'Create'}
-            </button>
-            <button type="button" className="btn-secondary" onClick={handleCancel}>
-              Cancel
-            </button>
-          </div>
-        </form>
+        </div>
       )}
 
-      <div className="products-table">
-        <h2>Products</h2>
-        {loading ? (
-          <div className="loading">Loading...</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Price</th>
-                <th>Stock</th>
-                <th>Category</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((product) => (
-                <tr key={product.productId}>
-                  <td>{product.name}</td>
-                  <td>${product.price?.toFixed(2)}</td>
-                  <td>{product.stock}</td>
-                  <td>{product.category || 'N/A'}</td>
-                  <td>
-                    <button
-                      className="edit-btn"
-                      onClick={() => handleEdit(product)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="delete-btn"
-                      onClick={() => handleDelete(product.productId)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+      <div className="products-section">
+        <div className="products-header">
+          <h2>Products ({filteredProducts.length})</h2>
+          
+          <div className="products-controls">
+            <input
+              type="text"
+              className="search-input"
+              placeholder="Search products..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+
+            <select
+              className="filter-select"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+            >
+              <option value="">All Categories</option>
+              {categories.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
               ))}
-            </tbody>
-          </table>
+            </select>
+
+            <select
+              className="sort-select"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+            >
+              <option value="name">Name (A-Z)</option>
+              <option value="price-asc">Price (Low to High)</option>
+              <option value="price-desc">Price (High to Low)</option>
+              <option value="stock-asc">Stock (Low to High)</option>
+              <option value="stock-desc">Stock (High to Low)</option>
+            </select>
+          </div>
+        </div>
+
+        {error && (
+          <div className="error-banner">
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="loading">Loading products...</div>
+        ) : filteredProducts.length === 0 ? (
+          <div className="empty-state">
+            <p>No products found</p>
+            {searchTerm || filterCategory ? (
+              <button 
+                className="btn-secondary"
+                onClick={() => {
+                  setSearchTerm('')
+                  setFilterCategory('')
+                }}
+              >
+                Clear Filters
+              </button>
+            ) : (
+              <button className="btn-primary" onClick={handleAddNew}>
+                Add Your First Product
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="products-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Image</th>
+                  <th>Name</th>
+                  <th>Price</th>
+                  <th>Stock</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProducts.map((product) => (
+                  <tr key={product.productId}>
+                    <td>
+                      {product.imageUrl ? (
+                        <img 
+                          src={product.imageUrl} 
+                          alt={product.name}
+                          className="product-thumbnail"
+                        />
+                      ) : (
+                        <div className="no-image">No Image</div>
+                      )}
+                    </td>
+                    <td>
+                      <div className="product-name">{product.name}</div>
+                      <div className="product-id">ID: {product.productId}</div>
+                    </td>
+                    <td className="price-cell">${product.price?.toFixed(2)}</td>
+                    <td className={product.stock < 10 ? 'low-stock' : ''}>
+                      {product.stock}
+                      {product.stock < 10 && product.stock > 0 && (
+                        <span className="stock-warning"> ⚠️</span>
+                      )}
+                      {product.stock === 0 && (
+                        <span className="stock-warning"> ❌</span>
+                      )}
+                    </td>
+                    <td>{product.category || '-'}</td>
+                    <td>
+                      <span className={`status-badge ${product.status || 'active'}`}>
+                        {product.status || 'active'}
+                      </span>
+                    </td>
+                    <td className="actions-cell">
+                      <button
+                        className="btn-edit"
+                        onClick={() => handleEdit(product)}
+                        disabled={showForm}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="btn-delete"
+                        onClick={() => handleDelete(product)}
+                        disabled={showForm}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

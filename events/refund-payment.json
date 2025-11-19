@@ -1,0 +1,7 @@
+{
+  "orderId": "ORDER#1234567890-abc123",
+  "paymentIntentId": "pi_3ABCDEFGHIJKLMNOPqr",
+  "amount": 129.57,
+  "reason": "Order processing failed",
+  "idempotencyKey": "ORDER#1234567890-abc123-refund"
+}
