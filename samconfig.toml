@@ -15,9 +15,9 @@ lint = true
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 confirm_changeset = true
 resolve_s3 = true
-s3_prefix = "ecommerce"
+s3_prefix = "dev-ecommerce-stack"
 region = "us-east-1"
-parameter_overrides = "Environment=dev"
+parameter_overrides = "Environment=\"dev\""
 image_repositories = []
 
 [default.package.parameters]

@@ -56,8 +56,8 @@ function Checkout() {
 
   return (
     <div className="checkout">
-      <h1>Checkout</h1>
-      <form onSubmit={handleSubmit} className="checkout-form">
+      <h1 id="checkout-title">Checkout</h1>
+      <form onSubmit={handleSubmit} className="checkout-form" aria-labelledby="checkout-title" noValidate>
         <section className="form-section">
           <h2>Contact Information</h2>
           <div className="form-group">
@@ -68,7 +68,9 @@ function Checkout() {
               name="email"
               value={formData.email}
               onChange={handleChange}
+              autoComplete="email"
               required
+              aria-required="true"
             />
           </div>
         </section>
@@ -83,7 +85,9 @@ function Checkout() {
               name="fullName"
               value={formData.fullName}
               onChange={handleChange}
+              autoComplete="name"
               required
+              aria-required="true"
             />
           </div>
           <div className="form-group">
@@ -94,7 +98,9 @@ function Checkout() {
               name="address"
               value={formData.address}
               onChange={handleChange}
+              autoComplete="street-address"
               required
+              aria-required="true"
             />
           </div>
           <div className="form-row">
@@ -106,7 +112,9 @@ function Checkout() {
                 name="city"
                 value={formData.city}
                 onChange={handleChange}
+                autoComplete="address-level2"
                 required
+                aria-required="true"
               />
             </div>
             <div className="form-group">
@@ -117,7 +125,9 @@ function Checkout() {
                 name="state"
                 value={formData.state}
                 onChange={handleChange}
+                autoComplete="address-level1"
                 required
+                aria-required="true"
               />
             </div>
             <div className="form-group">
@@ -128,7 +138,10 @@ function Checkout() {
                 name="zipCode"
                 value={formData.zipCode}
                 onChange={handleChange}
+                inputMode="numeric"
+                autoComplete="postal-code"
                 required
+                aria-required="true"
               />
             </div>
           </div>
@@ -145,7 +158,10 @@ function Checkout() {
               value={formData.cardNumber}
               onChange={handleChange}
               placeholder="1234 5678 9012 3456"
+              inputMode="numeric"
+              autoComplete="cc-number"
               required
+              aria-required="true"
             />
           </div>
           <div className="form-row">
@@ -158,7 +174,9 @@ function Checkout() {
                 value={formData.expiryDate}
                 onChange={handleChange}
                 placeholder="MM/YY"
+                autoComplete="cc-exp"
                 required
+                aria-required="true"
               />
             </div>
             <div className="form-group">
@@ -170,13 +188,22 @@ function Checkout() {
                 value={formData.cvv}
                 onChange={handleChange}
                 placeholder="123"
+                inputMode="numeric"
+                autoComplete="cc-csc"
                 required
+                aria-required="true"
               />
             </div>
           </div>
         </section>
 
-        <button type="submit" className="btn-primary submit-btn" disabled={loading}>
+        <button
+          type="submit"
+          className="btn-primary submit-btn"
+          disabled={loading}
+          aria-busy={loading || undefined}
+          aria-disabled={loading || undefined}
+        >
           {loading ? 'Processing...' : 'Place Order'}
         </button>
       </form>

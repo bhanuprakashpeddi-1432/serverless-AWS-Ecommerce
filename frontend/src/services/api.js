@@ -39,10 +39,18 @@ api.interceptors.response.use(
 // Products API
 export const productsApi = {
   getAll: () => api.get('/products'),
+  getProducts: (pageSize = 20, lastKey = null) => {
+    const params = { limit: pageSize }
+    if (lastKey) {
+      params.lastKey = lastKey
+    }
+    return api.get('/products', { params })
+  },
   getById: (id) => api.get(`/products/${id}`),
   create: (data) => api.post('/products', data),
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
+  getPresignedUploadUrl: (data) => api.post('/products/upload-url', data),
 }
 
 // Cart API

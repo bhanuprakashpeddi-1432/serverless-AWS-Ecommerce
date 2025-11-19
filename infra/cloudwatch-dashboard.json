@@ -1,0 +1,124 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Lambda Errors (by function)",
+        "stat": "Sum",
+        "period": 300,
+        "legend": {
+          "position": "bottom"
+        },
+        "metrics": [
+          [ { "expression": "SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Errors\"', 'Sum', 300)", "label": "Errors by Function", "id": "e1" } ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Lambda Duration p95 (by function)",
+        "stat": "p95",
+        "period": 300,
+        "legend": {
+          "position": "bottom"
+        },
+        "metrics": [
+          [ { "expression": "SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Duration\"', 'p95', 300)", "label": "p95 Duration (ms)", "id": "e1" } ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Step Functions - Executions Failed (by state machine)",
+        "stat": "Sum",
+        "period": 300,
+        "legend": {
+          "position": "bottom"
+        },
+        "metrics": [
+          [ { "expression": "SEARCH('{AWS/States,StateMachineArn} MetricName=\"ExecutionsFailed\"', 'Sum', 300)", "label": "ExecutionsFailed by StateMachine", "id": "e1" } ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "DynamoDB Throttled Requests (by table)",
+        "stat": "Sum",
+        "period": 300,
+        "legend": {
+          "position": "bottom"
+        },
+        "metrics": [
+          [ { "expression": "SEARCH('{AWS/DynamoDB,TableName} MetricName=\"ThrottledRequests\"', 'Sum', 300)", "label": "Throttles by Table", "id": "e1" } ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 12,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "singleValue",
+        "region": "us-east-1",
+        "title": "Total Lambda Errors (last 1h)",
+        "stat": "Sum",
+        "period": 300,
+        "setPeriodToTimeRange": true,
+        "metrics": [
+          [ { "expression": "SUM(SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Errors\"', 'Sum', 300))", "label": "Total Errors (sum)", "id": "e1" } ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 12,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "singleValue",
+        "region": "us-east-1",
+        "title": "Step Functions Failed Executions (last 1h)",
+        "stat": "Sum",
+        "period": 300,
+        "setPeriodToTimeRange": true,
+        "metrics": [
+          [ { "expression": "SUM(SEARCH('{AWS/States,StateMachineArn} MetricName=\"ExecutionsFailed\"', 'Sum', 300))", "label": "Total Failed Executions (sum)", "id": "e1" } ]
+        ]
+      }
+    }
+  ]
+}

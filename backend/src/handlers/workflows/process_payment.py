@@ -1,6 +1,7 @@
 """
 Process Payment Lambda Handler
-Step Functions task to process payment via payment gateway
+DUMMY IMPLEMENTATION - Always succeeds for demo purposes
+No external payment gateway required
 """
 import json
 import uuid
@@ -15,7 +16,7 @@ tracer = Tracer()
 @tracer.capture_lambda_handler
 @logger.inject_lambda_context
 def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
-    """Lambda handler entry point."""
+    """Lambda handler entry point - DUMMY PAYMENT (always succeeds)."""
     
     try:
         order_id = event.get('orderId')
@@ -23,27 +24,33 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         currency = event.get('currency', 'USD')
         payment_method_id = event.get('paymentMethodId')
         
-        logger.info(f"Processing payment for order: {order_id}, amount: {amount} {currency}")
+        logger.info(f"[DEMO] Processing dummy payment for order: {order_id}, amount: {amount} {currency}", extra={
+            'order_id': order_id,
+            'amount': amount,
+            'currency': currency,
+            'demo_mode': True
+        })
         
-        # TODO: Integrate with real payment gateway (Stripe, PayPal, etc.)
-        # For now, simulate successful payment
-        
-        transaction_id = f"txn_{uuid.uuid4().hex[:16]}"
+        # DUMMY IMPLEMENTATION - Always succeeds
+        # In production, integrate with Stripe, PayPal, Square, etc.
+        transaction_id = f"DEMO-{uuid.uuid4().hex[:12].upper()}"
         
         result = {
             'status': 'completed',
             'transactionId': transaction_id,
-            'message': f'Payment of {amount} {currency} processed successfully'
+            'message': f'Payment of {amount} {currency} processed successfully (DEMO MODE)',
+            'demoMode': True
         }
         
-        logger.info(f"Payment processed: {result}")
+        logger.info(f"[DEMO] Payment processed successfully: {result}")
         
         return result
         
     except Exception as e:
-        logger.exception("Error processing payment")
+        logger.exception("[DEMO] Error in dummy payment handler")
         return {
             'status': 'failed',
             'transactionId': '',
-            'message': str(e)
+            'message': f'Payment failed: {str(e)}',
+            'demoMode': True
         }

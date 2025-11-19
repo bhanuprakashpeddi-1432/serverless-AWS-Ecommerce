@@ -1,0 +1,12 @@
+{
+  "orderId": "ORDER#1234567890-abc123",
+  "userId": "user-123-456-789",
+  "amount": 117.98,
+  "currency": "usd",
+  "paymentMethodId": "pm_card_visa",
+  "idempotencyKey": "payment-1234567890-abc123",
+  "metadata": {
+    "customerEmail": "customer@example.com",
+    "orderNumber": "ORD-12345"
+  }
+}

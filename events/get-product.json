@@ -1,0 +1,13 @@
+{
+  "httpMethod": "GET",
+  "path": "/products/123",
+  "pathParameters": {
+    "id": "123"
+  },
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "body": null,
+  "isBase64Encoded": false
+}

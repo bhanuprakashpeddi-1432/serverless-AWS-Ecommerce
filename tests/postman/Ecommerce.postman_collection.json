@@ -1,0 +1,124 @@
+{
+  "info": {
+    "name": "Ecommerce API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "4b4a95bb-3a35-4a5f-a7db-0adbe0e0abcd"
+  },
+  "item": [
+    {
+      "name": "Auth - SignUp",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-amz-json-1.1" },
+          { "key": "X-Amz-Target", "value": "AWSCognitoIdentityProviderService.SignUp" }
+        ],
+        "url": {
+          "raw": "https://cognito-idp.{{region}}.amazonaws.com/",
+          "host": ["https://cognito-idp.{{region}}.amazonaws.com"],
+          "path": ["/"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ClientId\": \"{{cognitoClientId}}\",\n  \"Username\": \"{{username}}\",\n  \"Password\": \"{{password}}\",\n  \"UserAttributes\": [\n    {\"Name\": \"email\", \"Value\": \"{{email}}\"}\n  ]\n}"
+        }
+      }
+    },
+    {
+      "name": "Auth - InitiateAuth (Login)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-amz-json-1.1" },
+          { "key": "X-Amz-Target", "value": "AWSCognitoIdentityProviderService.InitiateAuth" }
+        ],
+        "url": {
+          "raw": "https://cognito-idp.{{region}}.amazonaws.com/",
+          "host": ["https://cognito-idp.{{region}}.amazonaws.com"],
+          "path": ["/"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"AuthFlow\": \"USER_PASSWORD_AUTH\",\n  \"ClientId\": \"{{cognitoClientId}}\",\n  \"AuthParameters\": {\n    \"USERNAME\": \"{{username}}\",\n    \"PASSWORD\": \"{{password}}\"\n  }\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var data = pm.response.json();",
+              "if (data && data.AuthenticationResult) {",
+              "  pm.collectionVariables.set('idToken', data.AuthenticationResult.IdToken);",
+              "  pm.collectionVariables.set('accessToken', data.AuthenticationResult.AccessToken);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Products - GetProducts",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{idToken}}" }
+        ],
+        "url": {
+          "raw": "{{apiBaseUrl}}/products?limit=20",
+          "host": ["{{apiBaseUrl}}"],
+          "path": ["products"],
+          "query": [{ "key": "limit", "value": "20" }]
+        }
+      }
+    },
+    {
+      "name": "Cart - Add Item",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{idToken}}" }
+        ],
+        "url": {
+          "raw": "{{apiBaseUrl}}/cart",
+          "host": ["{{apiBaseUrl}}"],
+          "path": ["cart"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 1\n}"
+        }
+      }
+    },
+    {
+      "name": "Checkout - Start",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{idToken}}" }
+        ],
+        "url": {
+          "raw": "{{apiBaseUrl}}/checkout/start",
+          "host": ["{{apiBaseUrl}}"],
+          "path": ["checkout", "start"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"shippingAddress\": {\n    \"street\": \"1 Test St\",\n    \"city\": \"Testville\",\n    \"state\": \"CA\",\n    \"zipCode\": \"90001\"\n  },\n  \"paymentMethod\": \"card\"\n}"
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "apiBaseUrl", "value": "https://<api-id>.execute-api.us-east-1.amazonaws.com" },
+    { "key": "region", "value": "us-east-1" },
+    { "key": "cognitoClientId", "value": "<your-app-client-id>" },
+    { "key": "username", "value": "testuser@example.com" },
+    { "key": "password", "value": "P@ssw0rd!123" },
+    { "key": "email", "value": "testuser@example.com" },
+    { "key": "productId", "value": "PRODUCT#example" }
+  ]
+}

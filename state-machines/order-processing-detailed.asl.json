@@ -1,0 +1,425 @@
+{
+  "Comment": "Order Processing State Machine with inventory validation, payment processing, and customer notification",
+  "StartAt": "CheckInventory",
+  "States": {
+    "CheckInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ValidateInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items"
+        }
+      },
+      "ResultPath": "$.inventoryCheck",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "InventoryError",
+            "InsufficientStockError"
+          ],
+          "ResultPath": "$.error",
+          "Next": "InventoryValidationFailed"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "CheckInventoryFailed"
+        }
+      ],
+      "Next": "ReserveInventory"
+    },
+    "ReserveInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${UpdateInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items",
+          "action": "reserve"
+        }
+      },
+      "ResultPath": "$.inventoryReservation",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "InventoryError",
+            "InsufficientStockError"
+          ],
+          "ResultPath": "$.error",
+          "Next": "InventoryReservationFailed"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "ReserveInventoryFailed"
+        }
+      ],
+      "Next": "ProcessPayment"
+    },
+    "ProcessPayment": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ProcessPaymentFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "amount.$": "$.pricing.total",
+          "paymentMethod.$": "$.paymentMethod",
+          "shippingAddress.$": "$.shippingAddress"
+        }
+      },
+      "ResultPath": "$.payment",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "PaymentGatewayTimeout",
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "PaymentFailed",
+            "PaymentDeclined",
+            "InsufficientFunds"
+          ],
+          "ResultPath": "$.error",
+          "Next": "ReleaseReservedInventory"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PaymentProcessingFailed"
+        }
+      ],
+      "Next": "CreateOrderRecord"
+    },
+    "CreateOrderRecord": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Item": {
+          "PK": {
+            "S.$": "$.orderId"
+          },
+          "SK": {
+            "S.$": "$.orderId"
+          },
+          "userId": {
+            "S.$": "$.userId"
+          },
+          "status": {
+            "S": "completed"
+          },
+          "items": {
+            "S.$": "States.JsonToString($.items)"
+          },
+          "pricing": {
+            "S.$": "States.JsonToString($.pricing)"
+          },
+          "shippingAddress": {
+            "S.$": "States.JsonToString($.shippingAddress)"
+          },
+          "paymentId": {
+            "S.$": "$.payment.result.paymentId"
+          },
+          "paymentStatus": {
+            "S.$": "$.payment.result.status"
+          },
+          "createdAt": {
+            "S.$": "$.createdAt"
+          },
+          "updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          },
+          "completedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": "$.orderRecord",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.AmazonDynamoDBException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "OrderRecordFailed"
+        }
+      ],
+      "Next": "NotifyCustomer"
+    },
+    "NotifyCustomer": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${SendOrderConfirmationFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "email.$": "$.email",
+          "orderDetails": {
+            "items.$": "$.items",
+            "pricing.$": "$.pricing",
+            "shippingAddress.$": "$.shippingAddress"
+          }
+        }
+      },
+      "ResultPath": "$.notification",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotificationFailed"
+        }
+      ],
+      "Next": "OrderSuccess"
+    },
+    "OrderSuccess": {
+      "Type": "Succeed",
+      "Comment": "Order processed successfully"
+    },
+    "ReleaseReservedInventory": {
+      "Type": "Task",
+      "Comment": "Release reserved inventory after payment failure",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${UpdateInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items",
+          "action": "release"
+        }
+      },
+      "ResultPath": "$.inventoryRelease",
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "PaymentFailedState"
+    },
+    "InventoryValidationFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "PK": {
+            "S.$": "$.orderId"
+          },
+          "SK": {
+            "S.$": "$.orderId"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #error = :error, #updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#error": "errorMessage",
+          "#updatedAt": "updatedAt"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "failed"
+          },
+          ":error": {
+            "S": "Inventory validation failed - insufficient stock"
+          },
+          ":updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": "$.updateResult",
+      "Next": "InventoryFailed"
+    },
+    "InventoryFailed": {
+      "Type": "Fail",
+      "Error": "InventoryError",
+      "Cause": "Insufficient inventory to fulfill order"
+    },
+    "InventoryReservationFailed": {
+      "Type": "Fail",
+      "Error": "InventoryReservationError",
+      "Cause": "Failed to reserve inventory for order"
+    },
+    "CheckInventoryFailed": {
+      "Type": "Fail",
+      "Error": "CheckInventoryError",
+      "Cause": "Failed to check inventory availability"
+    },
+    "ReserveInventoryFailed": {
+      "Type": "Fail",
+      "Error": "ReserveInventoryError",
+      "Cause": "Failed to reserve inventory"
+    },
+    "PaymentFailedState": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "PK": {
+            "S.$": "$.orderId"
+          },
+          "SK": {
+            "S.$": "$.orderId"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #error = :error, #updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#error": "errorMessage",
+          "#updatedAt": "updatedAt"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "failed"
+          },
+          ":error": {
+            "S.$": "$.error.Cause"
+          },
+          ":updatedAt": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": "$.updateResult",
+      "Next": "PaymentFailed"
+    },
+    "PaymentFailed": {
+      "Type": "Fail",
+      "Error": "PaymentError",
+      "Cause": "Payment processing failed"
+    },
+    "PaymentProcessingFailed": {
+      "Type": "Task",
+      "Comment": "Release inventory and record payment processing failure",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${UpdateInventoryFunctionArn}",
+        "Payload": {
+          "orderId.$": "$.orderId",
+          "userId.$": "$.userId",
+          "items.$": "$.items",
+          "action": "release"
+        }
+      },
+      "ResultPath": "$.inventoryRelease",
+      "Next": "PaymentProcessingError"
+    },
+    "PaymentProcessingError": {
+      "Type": "Fail",
+      "Error": "PaymentProcessingError",
+      "Cause": "Payment processing encountered an error"
+    },
+    "OrderRecordFailed": {
+      "Type": "Fail",
+      "Error": "OrderRecordError",
+      "Cause": "Failed to create order record in database"
+    },
+    "NotificationFailed": {
+      "Type": "Pass",
+      "Comment": "Notification failed but order is complete - log and continue",
+      "Result": {
+        "notificationStatus": "failed",
+        "orderStatus": "completed"
+      },
+      "ResultPath": "$.notificationResult",
+      "Next": "OrderSuccess"
+    }
+  }
+}

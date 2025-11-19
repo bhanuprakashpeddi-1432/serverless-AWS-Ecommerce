@@ -1,0 +1,21 @@
+{
+  "httpMethod": "POST",
+  "path": "/checkout/start",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer mock-token"
+  },
+  "requestContext": {
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "user-123-456-789",
+          "cognito:username": "testuser",
+          "email": "test@example.com"
+        }
+      }
+    }
+  },
+  "body": "{\"shippingAddress\":{\"street\":\"123 Main St\",\"city\":\"Seattle\",\"state\":\"WA\",\"zipCode\":\"98101\",\"country\":\"US\"},\"paymentMethod\":\"card\"}",
+  "isBase64Encoded": false
+}

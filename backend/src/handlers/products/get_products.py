@@ -59,7 +59,7 @@ def get_products(
             # Scan for non-category queries (less efficient)
             scan_params = {
                 'Limit': query_params['Limit'],
-                'FilterExpression': Attr('SK').eq('METADATA') & Attr('status').eq('active')
+                'FilterExpression': Attr('productId').exists() & Attr('status').eq('active')
             }
             
             # Add price filters
