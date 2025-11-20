@@ -5,6 +5,7 @@ GET /products - List all products with filtering and pagination
 import json
 import os
 from typing import Any, Dict
+from decimal import Decimal
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -17,6 +18,17 @@ app = APIGatewayHttpResolver()
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['PRODUCTS_TABLE'])
+
+
+def decimal_to_float(obj):
+    """Convert Decimal objects to float for JSON serialization."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: decimal_to_float(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [decimal_to_float(i) for i in obj]
+    return obj
 
 
 @tracer.capture_method
@@ -84,7 +96,7 @@ def get_products(
         # Format response
         products = response.get('Items', [])
         result = {
-            'products': products,
+            'products': decimal_to_float(products),
             'count': len(products)
         }
         
@@ -132,40 +144,21 @@ def list_products():
             next_token=next_token
         )
         
-        return {
-            'statusCode': 200,
-            'body': json.dumps(result),
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            }
-        }
+        # When using APIGatewayHttpResolver, just return the dict
+        # The resolver automatically wraps it in proper API Gateway response format
+        return result
         
     except ValueError as e:
         logger.warning(f"Invalid parameter: {str(e)}")
         return {
-            'statusCode': 400,
-            'body': json.dumps({
-                'error': 'INVALID_PARAMETER',
-                'message': str(e)
-            }),
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            }
+            'error': 'INVALID_PARAMETER',
+            'message': str(e)
         }
     except Exception as e:
         logger.exception("Error processing request")
         return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'error': 'INTERNAL_ERROR',
-                'message': 'An error occurred while processing your request'
-            }),
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            }
+            'error': 'INTERNAL_ERROR',
+            'message': 'An error occurred while processing your request'
         }
 
 
