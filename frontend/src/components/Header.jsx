@@ -1,9 +1,15 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
 import './Header.css'
 
 function Header() {
   const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+
+  const handleSignOut = () => {
+    signOut()
+    navigate('/')
+  }
 
   return (
     <header className="header">
@@ -22,14 +28,14 @@ function Header() {
               {user.isAdmin && (
                 <Link to="/admin" className="nav-link">Admin</Link>
               )}
-              <button onClick={signOut} className="btn-secondary">
+              <button onClick={handleSignOut} className="btn-secondary">
                 Sign Out
               </button>
             </>
           ) : (
-            <button className="btn-primary" type="button" aria-label="Sign in">
+            <Link to="/login" className="btn-primary">
               Sign In
-            </button>
+            </Link>
           )}
         </nav>
       </div>

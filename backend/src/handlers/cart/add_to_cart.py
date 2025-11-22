@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import Any, Dict
+from decimal import Decimal
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
 import boto3
@@ -18,13 +19,32 @@ carts_table = dynamodb.Table(os.environ['CARTS_TABLE'])
 products_table = dynamodb.Table(os.environ['PRODUCTS_TABLE'])
 
 
+def decimal_to_float(obj):
+    """Convert Decimal objects to float for JSON serialization."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: decimal_to_float(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [decimal_to_float(i) for i in obj]
+    return obj
+
+
 @tracer.capture_lambda_handler
 @logger.inject_lambda_context
 def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """Lambda handler entry point."""
     
     try:
-        user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
+        # Get user_id from JWT claims or use guest session
+        user_id = None
+        try:
+            user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
+        except (KeyError, TypeError):
+            # No authentication - use guest cart with session ID from headers or generate one
+            import uuid
+            user_id = f"guest-{uuid.uuid4().hex[:12]}"
+        
         body = json.loads(event.get('body', '{}'))
         
         product_id = body.get('productId')
@@ -39,11 +59,11 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 })
             }
         
-        # Get product details
+        # Get product details - use correct PK/SK format
         product_response = products_table.get_item(
             Key={
                 'PK': f'PRODUCT#{product_id}',
-                'SK': 'METADATA'
+                'SK': f'PRODUCT#{product_id}'
             }
         )
         
@@ -59,7 +79,8 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         product = product_response['Item']
         
         # Check inventory
-        if product['inventory'] < quantity:
+        stock = int(product.get('stock', 0))
+        if stock < quantity:
             return {
                 'statusCode': 400,
                 'body': json.dumps({
@@ -87,32 +108,32 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         items = cart.get('items', [])
         existing_item = next((item for item in items if item['productId'] == product_id), None)
         
+        price_decimal = Decimal(str(product.get('price', 0)))
+        
         if existing_item:
             existing_item['quantity'] += quantity
         else:
             items.append({
                 'productId': product_id,
-                'productName': product['name'],
+                'name': product.get('name', ''),
                 'quantity': quantity,
-                'price': product['price'],
-                'currency': product['currency'],
-                'imageUrl': product.get('images', [''])[0] if product.get('images') else '',
+                'price': price_decimal,
+                'imageUrl': product.get('imageUrl', ''),
                 'addedAt': datetime.utcnow().isoformat() + 'Z'
             })
         
-        # Calculate totals
-        subtotal = sum(item['price'] * item['quantity'] for item in items)
-        tax = subtotal * 0.08  # 8% tax
-        shipping = 9.99 if subtotal < 50 else 0
+        # Calculate totals using Decimal
+        subtotal = sum(Decimal(str(item['price'])) * item['quantity'] for item in items)
+        tax = subtotal * Decimal('0.08')  # 8% tax
+        shipping = Decimal('9.99') if subtotal < 50 else Decimal('0')
         total = subtotal + tax + shipping
         
         cart['items'] = items
         cart['totals'] = {
-            'subtotal': round(subtotal, 2),
-            'tax': round(tax, 2),
-            'shipping': round(shipping, 2),
-            'total': round(total, 2),
-            'currency': 'USD'
+            'subtotal': subtotal,
+            'tax': tax,
+            'shipping': shipping,
+            'total': total
         }
         cart['updatedAt'] = datetime.utcnow().isoformat() + 'Z'
         cart['expiresAt'] = int((datetime.utcnow() + timedelta(days=30)).timestamp())
@@ -120,9 +141,12 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         # Save cart
         carts_table.put_item(Item=cart)
         
+        # Convert Decimals for JSON response
+        response_cart = decimal_to_float(cart)
+        
         return {
             'statusCode': 200,
-            'body': json.dumps(cart, default=str),
+            'body': json.dumps(response_cart),
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
@@ -136,5 +160,9 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             'body': json.dumps({
                 'error': 'INTERNAL_ERROR',
                 'message': str(e)
-            })
+            }),
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            }
         }

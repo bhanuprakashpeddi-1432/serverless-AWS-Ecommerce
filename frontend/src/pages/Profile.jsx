@@ -18,7 +18,8 @@ function Profile() {
       setLoading(true)
       setError(null)
       const response = await ordersApi.getAll()
-      setOrders(response.data)
+      // API returns { orders: [...] } or array
+      setOrders(response.data.orders || response.data || [])
     } catch (err) {
       console.error('Error fetching orders:', err)
       setError('Failed to load orders.')

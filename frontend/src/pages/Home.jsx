@@ -17,7 +17,8 @@ function Home() {
       setLoading(true)
       setError(null)
       const response = await productsApi.getAll()
-      setProducts(response.data)
+      // API returns { products: [...], count: N }
+      setProducts(response.data.products || [])
     } catch (err) {
       console.error('Error fetching products:', err)
       setError('Failed to load products. Please try again later.')

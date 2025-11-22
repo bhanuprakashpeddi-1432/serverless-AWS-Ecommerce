@@ -257,7 +257,7 @@ Resources:
       FunctionName: !Sub ${Environment}-ecommerce-get-products
       CodeUri: backend/src/handlers/products/
       Handler: get_products.handler
-      Description: List all products with filtering and pagination
+      Description: List all products with filtering and pagination (v2)
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
@@ -400,8 +400,6 @@ Resources:
             ApiId: !Ref EcommerceHttpApi
             Path: /cart
             Method: POST
-            Auth:
-              Authorizer: CognitoAuthorizer
       Tags:
         Environment: !Ref Environment
 
@@ -424,8 +422,6 @@ Resources:
             ApiId: !Ref EcommerceHttpApi
             Path: /cart/items/{productId}
             Method: PUT
-            Auth:
-              Authorizer: CognitoAuthorizer
       Tags:
         Environment: !Ref Environment
 
@@ -446,8 +442,6 @@ Resources:
             ApiId: !Ref EcommerceHttpApi
             Path: /cart/items/{productId}
             Method: DELETE
-            Auth:
-              Authorizer: CognitoAuthorizer
       Tags:
         Environment: !Ref Environment
 
