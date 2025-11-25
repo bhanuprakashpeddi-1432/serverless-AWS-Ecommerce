@@ -21,7 +21,9 @@ function ProductDetail() {
       setLoading(true)
       setError(null)
       const response = await productsApi.getById(id)
-      setProduct(response.data)
+      // API returns product object directly or { product: {...} }
+      const productData = response.data.product || response.data
+      setProduct(productData)
     } catch (err) {
       console.error('Error fetching product:', err)
       setError('Failed to load product details.')

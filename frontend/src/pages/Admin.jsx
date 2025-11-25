@@ -24,7 +24,8 @@ function Admin() {
       setLoading(true)
       setError(null)
       const response = await productsApi.getAll()
-      setProducts(response.data.items || response.data || [])
+      // API returns { products: [...], count: N }
+      setProducts(response.data.products || response.data.items || response.data || [])
     } catch (err) {
       console.error('Error fetching products:', err)
       setError(err.response?.data?.message || 'Failed to load products')
